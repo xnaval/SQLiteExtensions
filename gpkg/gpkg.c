@@ -9,6 +9,7 @@
 ** Version history
 ** 1.0.0 - 2020-12-17 - Initial version
 ** 1.0.1 - 2021-03-18 - Corrected bug in isEmptyGPKGGeometry
+** 1.0.2 - 2021-05-01 - Added support for version 1.3
 **
 ******************************************************************************/
 
@@ -21,7 +22,14 @@ SQLITE_EXTENSION_INIT1
 // #define GPKG_ALLWAYS_USE_HEADER
 
 // Version of this extension
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
+
+// Application ID
+#define GPKG_APPLICATION_ID 1196444487
+
+// GPKG Versions
+#define GPKG_VERSION_10200 10200
+#define GPKG_VERSION_10300 10300
 
 // GeoPackage header constants
 #define GPKG_MAGIC1 0x47
@@ -95,7 +103,7 @@ static int sqlite3_exec_free(sqlite3_context *context, sqlite3 *db, char *sql, c
 static unsigned char endian()
 {
     volatile unsigned int i = 0x01234567;
-    if ((*((unsigned char*)(&i))) == 0x67)
+    if ((*((unsigned char *)(&i))) == 0x67)
         return LITTLE_ENDIAN;
     else
         return BIG_ENDIAN;
@@ -172,7 +180,7 @@ static int readWKBPointOrd(unsigned char *p_blob, int n_bytes, int *index, unsig
     return 1;
 }
 
-// Check if a Point is empty (In WKB a Point cannot be empty, but as we are processinbg GPKG geometries we aree considering empty a point with all its ordinates equal to NaN+)
+// Check if a Point is empty (In WKB a Point cannot be empty, but as we are processinbg GPKG geometries we are considering empty a point with all its ordinates equal to NaN+)
 // p_blob -> BLOB with geometry in WKB format
 // n_bytes -> Length in bytes of the blob
 // index <-> Position where to start reading the BLOB and returns the position where to continue reading
@@ -608,7 +616,7 @@ static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, un
     newByteOrder = p_blob[(*index)++];
     if (newByteOrder == LITTLE_ENDIAN || newByteOrder == BIG_ENDIAN) // Si no hi ha byteOrder, agafem el que ens venia per paràmetre
         byteOrder = newByteOrder;
-    
+
     typeInt = getInt(p_blob, index, byteOrder);
 
     // Check dimensions
@@ -635,43 +643,43 @@ static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, un
         return 0;
     switch (geometryType)
     {
-        case wkbPoint:
-            if (!readWKBPointOrd(p_blob, n_bytes, index, byteOrder, dimension, ordinate, res))
-                return 0;
-        break;
-
-        case wkbLineString:
-            if (!readWKBLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbPolygon:
-            if (!readWKBPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbMultiPoint:
-            if (!readWKBMultiPointEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbMultiLineString:
-            if (!readWKBMultiLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        case wkbMultiPolygon:
-            if (!readWKBMultiPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        case wkbGeometryCollection:
-            if (!readWKBGeometryCollectionEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        default:
+    case wkbPoint:
+        if (!readWKBPointOrd(p_blob, n_bytes, index, byteOrder, dimension, ordinate, res))
             return 0;
+        break;
+
+    case wkbLineString:
+        if (!readWKBLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbPolygon:
+        if (!readWKBPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiPoint:
+        if (!readWKBMultiPointEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiLineString:
+        if (!readWKBMultiLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiPolygon:
+        if (!readWKBMultiPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbGeometryCollection:
+        if (!readWKBGeometryCollectionEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    default:
+        return 0;
         break;
     }
     return 1;
@@ -715,12 +723,12 @@ static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int
     {
         switch (envelopeType)
         {
-            case 0: break; // No envelope
-            case 1: *index += 32; break; // X,Y envelope
-            case 2: *index += 48; break; // X,Y,Z envelope
-            case 3: *index += 48; break; // X,Y,M envelope
-            case 4: *index += 64;  break; // X,Y,X,M envelope
-            default: return 0; // Unknown envelope type
+        case 0: break; // No envelope
+        case 1: *index += 32; break; // X,Y envelope
+        case 2: *index += 48; break; // X,Y,Z envelope
+        case 3: *index += 48; break; // X,Y,M envelope
+        case 4: *index += 64;  break; // X,Y,X,M envelope
+        default: return 0; // Unknown envelope type
         }
     }
     else
@@ -728,12 +736,12 @@ static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int
         byteOrder = flags & GPKG_BYTEORDER_BIT;
         switch (envelopeType)
         {
-            case 0: return -1; // No envelope
-            case 1: dimension = 2; break; // X,Y envelope
-            case 2: dimension = 3; break; // X,Y,Z envelope
-            case 3: dimension = 3; break; // X,Y,M envelope
-            case 4: dimension = 4;  break; // X,Y,X,M envelope
-            default: return 0; // Unknown envelope type
+        case 0: return -1; // No envelope
+        case 1: dimension = 2; break; // X,Y envelope
+        case 2: dimension = 3; break; // X,Y,Z envelope
+        case 3: dimension = 3; break; // X,Y,M envelope
+        case 4: dimension = 4;  break; // X,Y,X,M envelope
+        default: return 0; // Unknown envelope type
         }
         if (ordinate == Z && (envelopeType == 1 || envelopeType == 3))
             return 0; // No Z in the envelope
@@ -795,12 +803,12 @@ static int skipGPKGHeader(unsigned char *p_blob, int n_bytes, int *index)
     envelopeType = (flags & GPKG_ENV_BITS) >> 1;
     switch (envelopeType)
     {
-        case 0: break; // No envelope
-        case 1: *index += 32; break; // X,Y envelope
-        case 2: *index += 48; break; // X,Y,Z envelope
-        case 3: *index += 48; break; // X,Y,M envelope
-        case 4: *index += 64;  break; // X,Y,X,M envelope
-        default: return 0; // Unknown envelope type
+    case 0: break; // No envelope
+    case 1: *index += 32; break; // X,Y envelope
+    case 2: *index += 48; break; // X,Y,Z envelope
+    case 3: *index += 48; break; // X,Y,M envelope
+    case 4: *index += 64;  break; // X,Y,X,M envelope
+    default: return 0; // Unknown envelope type
     }
     return 1;
 }
@@ -871,12 +879,12 @@ static int readEmptyGPKGHeader(unsigned char *p_blob, int n_bytes, int *index, i
     envelopeType = (flags & GPKG_ENV_BITS) >> 1;
     switch (envelopeType)
     {
-        case 0: break; // No envelope
-        case 1: *index += 32; break; // X,Y envelope
-        case 2: *index += 48; break; // X,Y,Z envelope
-        case 3: *index += 48; break; // X,Y,M envelope
-        case 4: *index += 64;  break; // X,Y,X,M envelope
-        default: *isEmpty = -1; return 0; // Unknown envelope type
+    case 0: break; // No envelope
+    case 1: *index += 32; break; // X,Y envelope
+    case 2: *index += 48; break; // X,Y,Z envelope
+    case 3: *index += 48; break; // X,Y,M envelope
+    case 4: *index += 64;  break; // X,Y,X,M envelope
+    default: *isEmpty = -1; return 0; // Unknown envelope type
     }
     return 1; // Ok 
 }
@@ -924,14 +932,14 @@ static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, un
         return -1;
     switch (geometryType)
     {
-        case wkbPoint: return isEmptyWKBPoint(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbLineString: return isEmptyWKBLineString(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbPolygon: return isEmptyWKBPolygon(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiPoint: return isEmptyWKBMultiPoint(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiLineString: return isEmptyWKBMultiLineString(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiPolygon: return isEmptyWKBMultiPolygon(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbGeometryCollection: return isEmptyWKBGeometryCollection(p_blob, n_bytes, index, byteOrder, dimension);
-        default: return -1;
+    case wkbPoint: return isEmptyWKBPoint(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbLineString: return isEmptyWKBLineString(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbPolygon: return isEmptyWKBPolygon(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiPoint: return isEmptyWKBMultiPoint(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiLineString: return isEmptyWKBMultiLineString(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiPolygon: return isEmptyWKBMultiPolygon(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbGeometryCollection: return isEmptyWKBGeometryCollection(p_blob, n_bytes, index, byteOrder, dimension);
+    default: return -1;
     }
 }
 
@@ -1197,7 +1205,7 @@ static void fnct_STIsEmpty(sqlite3_context *context, int argc, sqlite3_value **a
 // On success returns nothing. If there is an error throw an exception
 static void fnct_GPKGAddGeometryColumn(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    const char* identifier;
+    const char *identifier;
     const char *table;
     const char *gcolumn;
     const char *gtype;
@@ -1209,10 +1217,10 @@ static void fnct_GPKGAddGeometryColumn(sqlite3_context *context, int argc, sqlit
     char *sql;
 
     // Get the parameters
-    identifier = (const char*)sqlite3_value_text(argv[0]);
-    table = (const char*)sqlite3_value_text(argv[1]);
-    gcolumn = (const char*)sqlite3_value_text(argv[2]);
-    gtype = (const char*)sqlite3_value_text(argv[3]);
+    identifier = (const char *)sqlite3_value_text(argv[0]);
+    table = (const char *)sqlite3_value_text(argv[1]);
+    gcolumn = (const char *)sqlite3_value_text(argv[2]);
+    gtype = (const char *)sqlite3_value_text(argv[3]);
     srsid = sqlite3_value_int(argv[4]);
     zflag = sqlite3_value_int(argv[5]);
     mflag = sqlite3_value_int(argv[6]);
@@ -1276,9 +1284,9 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     char *sql, *errsql;
 
     // Get the parameters
-    table = (const char*)sqlite3_value_text(argv[0]);
-    gcolumn = (const char*)sqlite3_value_text(argv[1]);
-    icolumn = (const char*)sqlite3_value_text(argv[2]);
+    table = (const char *)sqlite3_value_text(argv[0]);
+    gcolumn = (const char *)sqlite3_value_text(argv[1]);
+    icolumn = (const char *)sqlite3_value_text(argv[2]);
 
     // Get DB handle
     db = sqlite3_context_db_handle(context);
@@ -1303,7 +1311,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Update record in rtree
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_update1\" AFTER UPDATE OF \"%w\" ON \"%w\" WHEN OLD.\"%w\" = NEW.\"%w\" AND (NEW.\"%w\" NOT NULL AND NOT ST_IsEmpty(NEW.\"%w\"))\nBEGIN\n   INSERT OR REPLACE INTO \"rtree_%w_%w\" VALUES (NEW.\"%w\", ST_MinX(NEW.\"%w\"), ST_MaxX(NEW.\"%w\"), ST_MinY(NEW.\"%w\"), ST_MaxY(NEW.\"%w\"));\nEND;",
         table, gcolumn, gcolumn, table, icolumn, icolumn, gcolumn, gcolumn, table, gcolumn, icolumn, gcolumn, gcolumn, gcolumn, gcolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1313,7 +1321,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_update2\" AFTER UPDATE OF \"%w\" ON \"%w\" WHEN OLD.\"%w\" = NEW.\"%w\" AND (NEW.\"%w\" IS NULL OR ST_IsEmpty(NEW.\"%w\"))\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id = OLD.\"%w\";\nEND;",
         table, gcolumn, gcolumn, table, icolumn, icolumn, gcolumn, gcolumn, table, gcolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1336,7 +1344,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree for old and new <i>
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_update4\" AFTER UPDATE ON \"%w\" WHEN OLD.\"%w\" != NEW.\"%w\" AND (NEW.\"%w\" IS NULL OR ST_IsEmpty(NEW.\"%w\"))\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id IN (OLD.\"%w\", NEW.\"%w\");\nEND;\n",
         table, gcolumn, table, icolumn, icolumn, gcolumn, gcolumn, table, gcolumn, icolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1345,15 +1353,15 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree for old <i>
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_delete\" AFTER DELETE ON \"%w\" WHEN old.\"%w\" NOT NULL\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id = OLD.\"%w\";\nEND;",
         table, gcolumn, table, gcolumn, table, gcolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
 
     // Register GPKG Extension
-    sql = sqlite3_mprintf("INSERT INTO gpkg_extensions(table_name, column_name, extension_name, definition, scope)  VALUES(%Q, %Q, 'gpkg_rtree_index', 'F.3 RTree Spatial Index', 'write-only')", 
+    sql = sqlite3_mprintf("INSERT INTO gpkg_extensions(table_name, column_name, extension_name, definition, scope)  VALUES(%Q, %Q, 'gpkg_rtree_index', 'F.3 RTree Spatial Index', 'write-only')",
         table, gcolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1361,7 +1369,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     // Populate rtree
     sql = sqlite3_mprintf("INSERT OR REPLACE INTO \"rtree_%w_%w\" SELECT \"%w\", ST_MinX(\"%w\"), ST_MaxX(\"%w\"), ST_MinY(\"%w\"), ST_MaxY(\"%w\") FROM \"%w\"",
         table, gcolumn, icolumn, gcolumn, gcolumn, gcolumn, gcolumn, table);
-    errsql = sqlite3_mprintf("DELETE FROM gpkg_extensions where table_name = %Q AND column_name = %Q AND extension_name = 'gpkg_rtree_index'; DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DELETE FROM gpkg_extensions where table_name = %Q AND column_name = %Q AND extension_name = 'gpkg_rtree_index'; DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1371,7 +1379,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
 // Drops a spatial index of a table and the corresponding triggers to maintain the integrity between the spatial index and the table
 // Unregisters the gpkg extension gpkg_rtree_index
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGDropSpatialIndex(sqlite3_context* context, int argc, sqlite3_value** argv)
+static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     const char *table;
     const char *gcolumn;
@@ -1379,15 +1387,15 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context* context, int argc, sqlite
     char *sql;
 
     // Get the parameters
-    table = (const char*)sqlite3_value_text(argv[0]);
-    gcolumn = (const char*)sqlite3_value_text(argv[1]);
+    table = (const char *)sqlite3_value_text(argv[0]);
+    gcolumn = (const char *)sqlite3_value_text(argv[1]);
 
     // Get DB handle
     db = sqlite3_context_db_handle(context);
 
     // Drop triggers and RTree
-    sql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
-                           table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
+    sql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update3\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_update1\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
+        table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, NULL) != SQLITE_OK)
         return;
 
@@ -1398,31 +1406,81 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context* context, int argc, sqlite
 }
 
 // SQL function: GPKG_Version(); 
-// Rturns an string showing the version of this extension
+// Returns an string showing the version of this extension
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGVersion(sqlite3_context* context, int argc, sqlite3_value** argv)
+static void fnct_GPKGExtVersion(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     sqlite3_result_text(context, VERSION, -1, NULL);
 }
 
-// SQL function: GPKG_Initialize(); 
+// SQL function: GPKG_Version(); 
+// Returns an integer showing the GeoPackage version
+// Is the value stored as PRAGMA user_version
+// On success returns nothing. If there is an error throw an exception
+static void fnct_GPKGVersion(sqlite3_context *context, int argc, sqlite3_value **argv)
+{
+    sqlite3 *db;
+    char *sql;
+    sqlite3_stmt *stmt;
+    int ret;
+    int version = 0;
+
+    // Get DB handle
+    db = sqlite3_context_db_handle(context);
+
+    // Query the version
+    sql = sqlite3_mprintf("PRAGMA user_version");
+    ret = sqlite3_prepare_v2(db, sql, (int)strlen(sql), &stmt, NULL);
+    if (ret != SQLITE_OK)
+    {
+        sqlite3_result_error(context, "GPKG_Version() error", -1);
+        return;
+    }
+    ret = sqlite3_step(stmt);
+    if (ret == SQLITE_ROW)
+        version = sqlite3_column_int(stmt, 0);
+    else
+    {
+        sqlite3_result_error(context, "GPKG_Version() version undefined", -1);
+        return;
+    }
+    sqlite3_finalize(stmt);
+
+    // Return the result
+    sqlite3_result_int(context, version);
+}
+
+// SQL function: GPKG_Initialize(version); 
 // Creates the base tables for an empty GeoPackage
+// version -> optional paràmeter must bé 10200 or 10300. If not specified assumes 10300.
 // On success returns nothing. If there is an error throw an exception
 static void fnct_GPKGInitialize(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     sqlite3 *db;
     char *sql, *errsql;
+    int userVersion = GPKG_VERSION_10300;
+
+    // Get the parameters
+    if (argc == 1)
+    {
+        userVersion = sqlite3_value_int(argv[0]);
+        if (userVersion != GPKG_VERSION_10200 && userVersion != GPKG_VERSION_10300)
+        {
+            sqlite3_result_error(context, "GPKG_Initialize() error: argument 1 [version] unsupported value. Must be 10200 or 10300.", -1);
+            return;
+        }
+    }
 
     // Get DB handle
     db = sqlite3_context_db_handle(context);
 
     // Set Application ID (Clause 1.1.1.1.1 Req 2)
-    sql = sqlite3_mprintf("PRAGMA application_id = 1196444487");
+    sql = sqlite3_mprintf("PRAGMA application_id = %d", GPKG_APPLICATION_ID);
     if (sqlite3_exec_free(context, db, sql, NULL) != SQLITE_OK)
         return;
 
     // Set User Version (Clause 1.1.1.1.1 Req 2)
-    sql = sqlite3_mprintf("PRAGMA user_version = 10200");
+    sql = sqlite3_mprintf("PRAGMA user_version = %d", userVersion);
     if (sqlite3_exec_free(context, db, sql, NULL) != SQLITE_OK)
         return;
 
@@ -1549,8 +1607,10 @@ int sqlite3_gpkg_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *
     sqlite3_create_function_v2(db, "GPKG_AddGeometryColumn", 7, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGAddGeometryColumn, 0, 0, 0);
     sqlite3_create_function_v2(db, "GPKG_AddSpatialIndex", 3, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGAddSpatialIndex, 0, 0, 0);
     sqlite3_create_function_v2(db, "GPKG_DropSpatialIndex", 2, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGDropSpatialIndex, 0, 0, 0);
+    sqlite3_create_function_v2(db, "GPKG_ExtVersion", 0, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGExtVersion, 0, 0, 0);
     sqlite3_create_function_v2(db, "GPKG_Version", 0, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGVersion, 0, 0, 0);
     sqlite3_create_function_v2(db, "GPKG_Initialize", 0, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGInitialize, 0, 0, 0);
+    sqlite3_create_function_v2(db, "GPKG_Initialize", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fnct_GPKGInitialize, 0, 0, 0);
 
     return rc;
 }
