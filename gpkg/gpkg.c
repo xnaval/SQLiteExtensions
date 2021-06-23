@@ -1174,7 +1174,7 @@ static void fnct_STMaxM(sqlite3_context *context, int argc, sqlite3_value **argv
 }
 
 // SQL function: SQL function: ST_IsEmpty(GEOMETRY); 
-// Returns 1 if the geometry is empty, 0 if it is not empty, -1 if there is an error (therefore ISEMPTY (GEOM) is evaluated in TRUE)
+// Returns 1 if the geometry is empty, 0 if it is not empty, -1 if there is an error (therefore ISEMPTY (GEOM) is evaluated to TRUE)
 static void fnct_STIsEmpty(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     unsigned char *p_blob;
@@ -1269,6 +1269,7 @@ static void fnct_GPKGAddGeometryColumn(sqlite3_context *context, int argc, sqlit
 // Creates a spatial index of a table and the corresponding triggers to maintain the integrity between the spatial index and the table
 // tableName -> Name of the table
 // geometryColumn -> Column that contains the geometry
+// idColumn -> Column that is the PrimaryKey of the table
 // The spatial index created is called rtree_tableName_geometryColumn
 // The triggers are called rtree_tableName_geometryColumn_insert, rtree_tableName_geometryColumn_update1, rtree_tableName_geometryColumn_update2, 
 //                         rtree_tableName_geometryColumn_update3, rtree_tableName_geometryColumn_update4, rtree_tableName_geometryColumn_delete
@@ -1376,6 +1377,9 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
 }
 
 // SQL function: GPKG_DropSpatialIndex(table, geometryColumn, idColumn); 
+// tableName -> Name of the table
+// geometryColumn -> Column that contains the geometry
+// idColumn -> Column that is the PrimaryKey of the table
 // Drops a spatial index of a table and the corresponding triggers to maintain the integrity between the spatial index and the table
 // Unregisters the gpkg extension gpkg_rtree_index
 // On success returns nothing. If there is an error throw an exception
@@ -1405,7 +1409,7 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite
     sqlite3_exec_free(context, db, sql, NULL);
 }
 
-// SQL function: GPKG_Version(); 
+// SQL function: GPKG_ExtVersion(); 
 // Returns an string showing the version of this extension
 // On success returns nothing. If there is an error throw an exception
 static void fnct_GPKGExtVersion(sqlite3_context *context, int argc, sqlite3_value **argv)
@@ -1452,7 +1456,7 @@ static void fnct_GPKGVersion(sqlite3_context *context, int argc, sqlite3_value *
 
 // SQL function: GPKG_Initialize(version); 
 // Creates the base tables for an empty GeoPackage
-// version -> optional paràmeter must bé 10200 or 10300. If not specified assumes 10300.
+// version -> optional parameter must be 10200 or 10300. If not specified assumes 10300.
 // On success returns nothing. If there is an error throw an exception
 static void fnct_GPKGInitialize(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
