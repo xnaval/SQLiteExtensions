@@ -10,6 +10,7 @@
 ** 1.0.0 - 2020-12-17 - Initial version
 ** 1.0.1 - 2021-03-18 - Corrected bug in isEmptyGPKGGeometry
 ** 1.0.2 - 2021-05-01 - Added support for version 1.3
+** 1.0.3 - 2021-06-29 - Bug where removing an GPKG extension
 **
 ******************************************************************************/
 
@@ -22,7 +23,7 @@ SQLITE_EXTENSION_INIT1
 // #define GPKG_ALLWAYS_USE_HEADER
 
 // Version of this extension
-#define VERSION "1.0.2"
+#define VERSION "1.0.3"
 
 // Application ID
 #define GPKG_APPLICATION_ID 1196444487
@@ -1404,7 +1405,7 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite
         return;
 
     // Remove GPKG Extension
-    sql = sqlite3_mprintf("DELETE FROM gpkg_extensions WHERE LOWER(stable_name) = LOWER(%Q) AND LOWER(column_name) = LOWER(%Q) AND extension_name = 'gpkg_rtree_index'",
+    sql = sqlite3_mprintf("DELETE FROM gpkg_extensions WHERE LOWER(table_name) = LOWER(%Q) AND LOWER(column_name) = LOWER(%Q) AND extension_name = 'gpkg_rtree_index'",
         table, gcolumn);
     sqlite3_exec_free(context, db, sql, NULL);
 }
