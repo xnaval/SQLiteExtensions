@@ -1404,7 +1404,7 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite
         return;
 
     // Remove GPKG Extension
-    sql = sqlite3_mprintf("DELETE FROM gpkg_extension WHERE LOWER(stable_name) = LOWER(%Q) AND LOWER(column_name) = LOWER(%Q) AND extension_name = 'gpkg_rtree_index'",
+    sql = sqlite3_mprintf("DELETE FROM gpkg_extensions WHERE LOWER(stable_name) = LOWER(%Q) AND LOWER(column_name) = LOWER(%Q) AND extension_name = 'gpkg_rtree_index'",
         table, gcolumn);
     sqlite3_exec_free(context, db, sql, NULL);
 }
