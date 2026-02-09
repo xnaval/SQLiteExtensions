@@ -14,7 +14,7 @@
   <h3 align="center">SQLiteExtensions</h3>
 
   <p align="center">
-    An "SQLite extension" that implements the minimum functions to create and handle a GeoPackage version 1.2
+    An "SQLite extension" that implements the minimum functions to create and handle a GeoPackage versions 1.2, 1.3 and 1.4
     <br />
     <a href="https://github.com/xnaval/SQLiteExtensions"><strong>Explore the docs »</strong></a>
     <br />
@@ -52,7 +52,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-This is an "SQLite extension" that implements the minimum functions to create and handle a GeoPackage version 1.2 and 1.3.
+This is an "SQLite extension" that implements the minimum functions to create and handle a GeoPackage version 1.2, 1.3 and 1.4.
 
 By the moment it only handles the vector features.
 
@@ -89,10 +89,10 @@ sqlite3
 ```
 select GPKG_Initialize();
 ```
-This will create an 1.3 GeoPackage.
-To create an 1.2 geoPackage do
+This will create an 1.4 GeoPackage.
+To create an 1.3 geoPackage do
 ```
-select GPKG_Initialize(10200);
+select GPKG_Initialize(10300);
 ```
 * To register an existing table with a geometry column
 ```
