@@ -68,7 +68,7 @@ To get a local copy up and running follow these simple steps.
 
 ### Prerequisites
 
-Open the solution (SQLiteExtensions.sln) with VisualStudio 2019 and compile it.
+Open the solution (SQLiteExtensions.sln) with VisualStudio 2022 and compile it.
 
 ### Installation
 

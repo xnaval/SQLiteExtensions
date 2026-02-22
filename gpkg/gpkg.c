@@ -1,7 +1,7 @@
 /******************************************************************************
 **
 ** This "SQLite extension" implements the minimum functions to create and
-** handle a GeoPackage version 1.2
+** handle a GeoPackage from version 1.2 to version 1.4.
 ** It handles this extensions :
 **
 ******************************************************************************
@@ -12,6 +12,7 @@
 ** 1.0.2 - 2021-05-01 - Added support for version 1.3
 ** 1.0.3 - 2021-06-29 - Bug where removing an GPKG extension
 ** 1.0.4 - 2026-02-09 - Support GeoPackage 1.4
+** 1.0.5 - 2026-02-21 - Correction of the content of gpkg_extensions.definition when creating spatial indexes (gpkg_rtree_index)
 **
 ******************************************************************************/
 
@@ -24,7 +25,7 @@ SQLITE_EXTENSION_INIT1
 // #define GPKG_ALLWAYS_USE_HEADER
 
 // Version of this extension
-#define VERSION "1.0.4"
+#define VERSION "1.0.5"
 
 // Application ID
 #define GPKG_APPLICATION_ID 1196444487
@@ -58,7 +59,7 @@ static const unsigned char BIG_ENDIAN = (unsigned char)0;
 #define wkbGeometryCollection 7
 
 // Geometry type names (accepts GEOMETRYCOLLECTION as a synonym of GEOMCOLLECTION)
-static const char *wktGeomtryTypes[] = { "GEOMETRY", "POINT", "LINESTRING", "POLYGON", "MULTIPOINT", "MULTILINESTRING", "MULTIPOLYGON", "GEOMCOLLECTION", "GEOMETRYCOLLECTION", NULL };
+static const char* wktGeomtryTypes[] = { "GEOMETRY", "POINT", "LINESTRING", "POLYGON", "MULTIPOINT", "MULTILINESTRING", "MULTIPOLYGON", "GEOMCOLLECTION", "GEOMETRYCOLLECTION", NULL };
 
 // Ordinates
 #define X 0
@@ -71,8 +72,8 @@ static const char *wktGeomtryTypes[] = { "GEOMETRY", "POINT", "LINESTRING", "POL
 #define MAX 1
 
 // "fordward" declarations
-static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double *res);
-static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int geometryTypeExpected);
+static int readWKBGeometryEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double* res);
+static int isEmptyWKBGeometry(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int geometryTypeExpected);
 
 // Utility function that executes the SQL in "sql" using sqlite3_exec.
 // If it fails it executes the SQL in "errsql" using sqlite3_exec as long as it is not NULL
@@ -84,10 +85,10 @@ static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, un
 // sql -> SQL statement to execute
 // errsql -> SQL statement to execute if the previous one failed
 // Returns the result of "sqlite3_exec(sql)"
-static int sqlite3_exec_free(sqlite3_context *context, sqlite3 *db, char *sql, char *errsql)
+static int sqlite3_exec_free(sqlite3_context* context, sqlite3* db, char* sql, char* errsql)
 {
     int res;
-    char *err = NULL;
+    char* err = NULL;
 
     res = sqlite3_exec(db, sql, NULL, NULL, &err);
     if (res != SQLITE_OK)
@@ -117,12 +118,12 @@ static unsigned char endian()
 // index -> start read position that gets atvanced 4 bytes
 // byteOrder -> ENDIANESS
 // Returns the int readed
-static int getInt(unsigned char *p_blob, int *index, unsigned char byteOrder)
+static int getInt(unsigned char* p_blob, int* index, unsigned char byteOrder)
 {
     int res;
 
     if (byteOrder == endian())
-        res = *(int *)&p_blob[*index];
+        res = *(int*)&p_blob[*index];
     else
     {
         unsigned char bytes[4] = { 0, 0, 0, 0 }; // Initialized to remove the LNT1006 message from Visual C
@@ -130,7 +131,7 @@ static int getInt(unsigned char *p_blob, int *index, unsigned char byteOrder)
         bytes[1] = p_blob[*index + 2];
         bytes[2] = p_blob[*index + 1];
         bytes[3] = p_blob[*index];
-        res = *(int *)bytes;
+        res = *(int*)bytes;
     }
     *index += 4;
     return res;
@@ -141,12 +142,12 @@ static int getInt(unsigned char *p_blob, int *index, unsigned char byteOrder)
 // index -> start read position that gets atvanced 8 bytes
 // byteOrder -> ENDIANESS
 // Returns the double readed
-static double getDouble(unsigned char *p_blob, int *index, unsigned char byteOrder)
+static double getDouble(unsigned char* p_blob, int* index, unsigned char byteOrder)
 {
     double res;
 
     if (byteOrder == endian())
-        res = *(double *)&p_blob[*index];
+        res = *(double*)&p_blob[*index];
     else
     {
         unsigned char bytes[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // Initialized to remove the LNT1006 message from Visual C
@@ -158,7 +159,7 @@ static double getDouble(unsigned char *p_blob, int *index, unsigned char byteOrd
         bytes[5] = p_blob[*index + 2];
         bytes[6] = p_blob[*index + 1];
         bytes[7] = p_blob[*index];
-        res = *(double *)bytes;
+        res = *(double*)bytes;
     }
     *index += 8;
     return res;
@@ -173,7 +174,7 @@ static double getDouble(unsigned char *p_blob, int *index, unsigned char byteOrd
 // dimension -> Dimensions of the coordinates of the geometry
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBPointOrd(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, double *res)
+static int readWKBPointOrd(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, double* res)
 {
     if (*index + (dimension * 8) > n_bytes)
         return 0;
@@ -190,7 +191,7 @@ static int readWKBPointOrd(unsigned char *p_blob, int n_bytes, int *index, unsig
 // byteOrder -> ENDIANESS in which the BLOB is stored
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
-static int isEmptyWKBPoint(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBPoint(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     if (*index + (dimension * 8) > n_bytes)
         return -1;
@@ -215,7 +216,7 @@ static int isEmptyWKBPoint(unsigned char *p_blob, int n_bytes, int *index, unsig
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBLineStringEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBLineStringEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numPoints = getInt(p_blob, index, byteOrder);
     if (numPoints < 1)
@@ -251,7 +252,7 @@ static int readWKBLineStringEnv(unsigned char *p_blob, int n_bytes, int *index, 
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // An empty LinesString has no points
-static int isEmptyWKBLineString(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBLineString(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numPoints = getInt(p_blob, index, byteOrder);
     if (numPoints < 1)
@@ -269,7 +270,7 @@ static int isEmptyWKBLineString(unsigned char *p_blob, int n_bytes, int *index, 
 // byteOrder -> ENDIANESS in which the BLOB is stored
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 0 if there is an error or 1 if it's correct
-static int skipWKBLineString(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int skipWKBLineString(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numPoints = getInt(p_blob, index, byteOrder);
     if (numPoints < 1)
@@ -290,7 +291,7 @@ static int skipWKBLineString(unsigned char *p_blob, int n_bytes, int *index, uns
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBPolygonEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBPolygonEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numRings = getInt(p_blob, index, byteOrder);
     if (numRings < 1)
@@ -336,7 +337,7 @@ static int readWKBPolygonEnv(unsigned char *p_blob, int n_bytes, int *index, uns
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // An empty Polygon has only an exterior ring that is empty
-static int isEmptyWKBPolygon(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBPolygon(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numRings = getInt(p_blob, index, byteOrder);
     if (numRings < 1)
@@ -361,7 +362,7 @@ static int isEmptyWKBPolygon(unsigned char *p_blob, int n_bytes, int *index, uns
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBMultiPointEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBMultiPointEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -395,7 +396,7 @@ static int readWKBMultiPointEnv(unsigned char *p_blob, int n_bytes, int *index, 
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // All the components of an empty MultiPoint are empty
-static int isEmptyWKBMultiPoint(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBMultiPoint(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -422,7 +423,7 @@ static int isEmptyWKBMultiPoint(unsigned char *p_blob, int n_bytes, int *index, 
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBMultiLineStringEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBMultiLineStringEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -456,7 +457,7 @@ static int readWKBMultiLineStringEnv(unsigned char *p_blob, int n_bytes, int *in
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // All the components of an empty MultiLineString are empty
-static int isEmptyWKBMultiLineString(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBMultiLineString(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -483,7 +484,7 @@ static int isEmptyWKBMultiLineString(unsigned char *p_blob, int n_bytes, int *in
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBMultiPolygonEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBMultiPolygonEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -517,7 +518,7 @@ static int readWKBMultiPolygonEnv(unsigned char *p_blob, int n_bytes, int *index
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // All the components of an empty MultiPolygon are empty
-static int isEmptyWKBMultiPolygon(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBMultiPolygon(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -544,7 +545,7 @@ static int isEmptyWKBMultiPolygon(unsigned char *p_blob, int n_bytes, int *index
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBGeometryCollectionEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double *res)
+static int readWKBGeometryCollectionEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension, int ordinate, int maxmin, double* res)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -578,7 +579,7 @@ static int readWKBGeometryCollectionEnv(unsigned char *p_blob, int n_bytes, int 
 // dimension -> Dimensions of the coordinates of the geometry
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // All the components of an empty GeometryCollecion are empty
-static int isEmptyWKBGeometryCollection(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int dimension)
+static int isEmptyWKBGeometryCollection(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int dimension)
 {
     int numGeoms = getInt(p_blob, index, byteOrder);
     if (numGeoms < 1)
@@ -605,7 +606,7 @@ static int isEmptyWKBGeometryCollection(unsigned char *p_blob, int n_bytes, int 
 // geometryTypeExpected -> Type of geometry we expect to find. If we put wkbgGeometry it accepts all geometry type.
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double *res)
+static int readWKBGeometryEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double* res)
 {
     unsigned char newByteOrder;
     int typeInt;
@@ -619,7 +620,7 @@ static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, un
     newByteOrder = p_blob[(*index)++];
     if (newByteOrder == LITTLE_ENDIAN || newByteOrder == BIG_ENDIAN) // Si no hi ha byteOrder, agafem el que ens venia per paràmetre
         byteOrder = newByteOrder;
-    
+
     typeInt = getInt(p_blob, index, byteOrder);
 
     // Check dimensions
@@ -646,43 +647,43 @@ static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, un
         return 0;
     switch (geometryType)
     {
-        case wkbPoint:
-            if (!readWKBPointOrd(p_blob, n_bytes, index, byteOrder, dimension, ordinate, res))
-                return 0;
-        break;
-
-        case wkbLineString:
-            if (!readWKBLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbPolygon:
-            if (!readWKBPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbMultiPoint:
-            if (!readWKBMultiPointEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-                return 0;
-        break;
-
-        case wkbMultiLineString:
-            if (!readWKBMultiLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        case wkbMultiPolygon:
-            if (!readWKBMultiPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        case wkbGeometryCollection:
-            if (!readWKBGeometryCollectionEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
-              return 0;
-        break;
-
-        default:
+    case wkbPoint:
+        if (!readWKBPointOrd(p_blob, n_bytes, index, byteOrder, dimension, ordinate, res))
             return 0;
+        break;
+
+    case wkbLineString:
+        if (!readWKBLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbPolygon:
+        if (!readWKBPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiPoint:
+        if (!readWKBMultiPointEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiLineString:
+        if (!readWKBMultiLineStringEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbMultiPolygon:
+        if (!readWKBMultiPolygonEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    case wkbGeometryCollection:
+        if (!readWKBGeometryCollectionEnv(p_blob, n_bytes, index, byteOrder, dimension, ordinate, maxmin, res))
+            return 0;
+        break;
+
+    default:
+        return 0;
         break;
     }
     return 1;
@@ -696,7 +697,7 @@ static int readWKBGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, un
 // maxmin -> It says if we want the maximum or the minimum of the ordinate
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error reading del GPKG header, 1 if the GPKG header is correct, -1 if the header is correct but has no envelope
-static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int ordinate, int maxmin, double *res)
+static int readGPKGHeaderEnv(unsigned char* p_blob, int n_bytes, int* index, int ordinate, int maxmin, double* res)
 {
     unsigned char flags;
     int envelopeType;
@@ -726,12 +727,12 @@ static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int
     {
         switch (envelopeType)
         {
-            case 0: break; // No envelope
-            case 1: *index += 32; break; // X,Y envelope
-            case 2: *index += 48; break; // X,Y,Z envelope
-            case 3: *index += 48; break; // X,Y,M envelope
-            case 4: *index += 64;  break; // X,Y,X,M envelope
-            default: return 0; // Unknown envelope type
+        case 0: break; // No envelope
+        case 1: *index += 32; break; // X,Y envelope
+        case 2: *index += 48; break; // X,Y,Z envelope
+        case 3: *index += 48; break; // X,Y,M envelope
+        case 4: *index += 64;  break; // X,Y,X,M envelope
+        default: return 0; // Unknown envelope type
         }
     }
     else
@@ -739,12 +740,12 @@ static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int
         byteOrder = flags & GPKG_BYTEORDER_BIT;
         switch (envelopeType)
         {
-            case 0: return -1; // No envelope
-            case 1: dimension = 2; break; // X,Y envelope
-            case 2: dimension = 3; break; // X,Y,Z envelope
-            case 3: dimension = 3; break; // X,Y,M envelope
-            case 4: dimension = 4;  break; // X,Y,X,M envelope
-            default: return 0; // Unknown envelope type
+        case 0: return -1; // No envelope
+        case 1: dimension = 2; break; // X,Y envelope
+        case 2: dimension = 3; break; // X,Y,Z envelope
+        case 3: dimension = 3; break; // X,Y,M envelope
+        case 4: dimension = 4;  break; // X,Y,X,M envelope
+        default: return 0; // Unknown envelope type
         }
         if (ordinate == Z && (envelopeType == 1 || envelopeType == 3))
             return 0; // No Z in the envelope
@@ -782,7 +783,7 @@ static int readGPKGHeaderEnv(unsigned char *p_blob, int n_bytes, int *index, int
 // n_bytes -> Length in bytes of the blob
 // index <-> Position where to start reading the BLOB and returns the position where to continue reading
 // Returns 0 if there is an error reading del GPKG header, 1 if the GPKG header is correct
-static int skipGPKGHeader(unsigned char *p_blob, int n_bytes, int *index)
+static int skipGPKGHeader(unsigned char* p_blob, int n_bytes, int* index)
 {
     unsigned char flags;
     int envelopeType;
@@ -806,12 +807,12 @@ static int skipGPKGHeader(unsigned char *p_blob, int n_bytes, int *index)
     envelopeType = (flags & GPKG_ENV_BITS) >> 1;
     switch (envelopeType)
     {
-        case 0: break; // No envelope
-        case 1: *index += 32; break; // X,Y envelope
-        case 2: *index += 48; break; // X,Y,Z envelope
-        case 3: *index += 48; break; // X,Y,M envelope
-        case 4: *index += 64;  break; // X,Y,X,M envelope
-        default: return 0; // Unknown envelope type
+    case 0: break; // No envelope
+    case 1: *index += 32; break; // X,Y envelope
+    case 2: *index += 48; break; // X,Y,Z envelope
+    case 3: *index += 48; break; // X,Y,M envelope
+    case 4: *index += 64;  break; // X,Y,X,M envelope
+    default: return 0; // Unknown envelope type
     }
     return 1;
 }
@@ -826,7 +827,7 @@ static int skipGPKGHeader(unsigned char *p_blob, int n_bytes, int *index)
 // geometryTypeExpected -> Type of geometry we expect to find. If we put wkbgGeometry it accepts all geometry type.
 // res <- Value we requested (maximum or minimum of the ordinate)
 // Returns 0 if there is an error or 1 if it's correct
-static int readGPKGGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double *res)
+static int readGPKGGeometryEnv(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int ordinate, int maxmin, int geometryTypeExpected, double* res)
 {
     int headerOk;
 
@@ -854,7 +855,7 @@ static int readGPKGGeometryEnv(unsigned char *p_blob, int n_bytes, int *index, u
 // index <-> Position where to start reading the BLOB and returns the position where to continue reading
 // isEmpty <- Gets the value of 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
 // Returns 0 if there is an error reading the GPKG header or 1 if the GPKG header is correct
-static int readEmptyGPKGHeader(unsigned char *p_blob, int n_bytes, int *index, int *isEmpty)
+static int readEmptyGPKGHeader(unsigned char* p_blob, int n_bytes, int* index, int* isEmpty)
 {
     unsigned char flags;
     int envelopeType;
@@ -882,12 +883,12 @@ static int readEmptyGPKGHeader(unsigned char *p_blob, int n_bytes, int *index, i
     envelopeType = (flags & GPKG_ENV_BITS) >> 1;
     switch (envelopeType)
     {
-        case 0: break; // No envelope
-        case 1: *index += 32; break; // X,Y envelope
-        case 2: *index += 48; break; // X,Y,Z envelope
-        case 3: *index += 48; break; // X,Y,M envelope
-        case 4: *index += 64;  break; // X,Y,X,M envelope
-        default: *isEmpty = -1; return 0; // Unknown envelope type
+    case 0: break; // No envelope
+    case 1: *index += 32; break; // X,Y envelope
+    case 2: *index += 48; break; // X,Y,Z envelope
+    case 3: *index += 48; break; // X,Y,M envelope
+    case 4: *index += 64;  break; // X,Y,X,M envelope
+    default: *isEmpty = -1; return 0; // Unknown envelope type
     }
     return 1; // Ok 
 }
@@ -899,7 +900,7 @@ static int readEmptyGPKGHeader(unsigned char *p_blob, int n_bytes, int *index, i
 // byteOrder -> ENDIANESS in which the BLOB is stored
 // geometryTypeExpected -> Type of geometry we hope to find. If we put wkbgGeometry it accepts all geometries
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
-static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int geometryTypeExpected)
+static int isEmptyWKBGeometry(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int geometryTypeExpected)
 {
     unsigned char newByteOrder;
     int typeInt;
@@ -935,14 +936,14 @@ static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, un
         return -1;
     switch (geometryType)
     {
-        case wkbPoint: return isEmptyWKBPoint(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbLineString: return isEmptyWKBLineString(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbPolygon: return isEmptyWKBPolygon(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiPoint: return isEmptyWKBMultiPoint(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiLineString: return isEmptyWKBMultiLineString(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbMultiPolygon: return isEmptyWKBMultiPolygon(p_blob, n_bytes, index, byteOrder, dimension);
-        case wkbGeometryCollection: return isEmptyWKBGeometryCollection(p_blob, n_bytes, index, byteOrder, dimension);
-        default: return -1;
+    case wkbPoint: return isEmptyWKBPoint(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbLineString: return isEmptyWKBLineString(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbPolygon: return isEmptyWKBPolygon(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiPoint: return isEmptyWKBMultiPoint(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiLineString: return isEmptyWKBMultiLineString(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbMultiPolygon: return isEmptyWKBMultiPolygon(p_blob, n_bytes, index, byteOrder, dimension);
+    case wkbGeometryCollection: return isEmptyWKBGeometryCollection(p_blob, n_bytes, index, byteOrder, dimension);
+    default: return -1;
     }
 }
 
@@ -953,7 +954,7 @@ static int isEmptyWKBGeometry(unsigned char *p_blob, int n_bytes, int *index, un
 // byteOrder -> ENDIANESS in which the BLOB is stored
 // geometryTypeExpected -> Type of geometry we hope to find. If we put wkbgGeometry it accepts all geometries
 // Returns 1 if the Geometry is empty, 0 if it is not empty, -1 if there is an error
-static int isEmptyGPKGGeometry(unsigned char *p_blob, int n_bytes, int *index, unsigned char byteOrder, int geometryTypeExpected)
+static int isEmptyGPKGGeometry(unsigned char* p_blob, int n_bytes, int* index, unsigned char byteOrder, int geometryTypeExpected)
 {
     int isEmpty = 0;
 
@@ -978,16 +979,16 @@ static int isEmptyGPKGGeometry(unsigned char *p_blob, int n_bytes, int *index, u
 
 // SQL function: ST_MinX(GEOMETRY); 
 // Returns the minimum X of a geometry or NULL if there is an error
-static void fnct_STMinX(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMinX(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1003,16 +1004,16 @@ static void fnct_STMinX(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: ST_MinY(GEOMETRY); 
 // Returns the minimum Y of a geometry or NULL if there is an error
-static void fnct_STMinY(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMinY(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1028,16 +1029,16 @@ static void fnct_STMinY(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: ST_MinZ(GEOMETRY); 
 // Returns the minimum Z of a geometry or NULL if there is an error
-static void fnct_STMinZ(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMinZ(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1053,16 +1054,16 @@ static void fnct_STMinZ(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: ST_MinM(GEOMETRY); 
 // Returns the minimum M of a geometry or NULL if there is an error
-static void fnct_STMinM(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMinM(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1078,16 +1079,16 @@ static void fnct_STMinM(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: SQL function: ST_MaxX(GEOMETRY); 
 // Returns the maximum X of a geometry or NULL if there is an error
-static void fnct_STMaxX(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMaxX(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1103,16 +1104,16 @@ static void fnct_STMaxX(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: SQL function: ST_MaxY(GEOMETRY); 
 // Returns the maximum Y of a geometry or NULL if there is an error
-static void fnct_STMaxY(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMaxY(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1128,16 +1129,16 @@ static void fnct_STMaxY(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: SQL function: ST_MaxZ(GEOMETRY); 
 // Returns the maximum Z of a geometry or NULL if there is an error
-static void fnct_STMaxZ(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMaxZ(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1153,16 +1154,16 @@ static void fnct_STMaxZ(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: SQL function: ST_MaxM(GEOMETRY); 
 // Returns the maximum M of a geometry or NULL if there is an error
-static void fnct_STMaxM(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STMaxM(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     double res;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 29) // Not enough bytes (A point without SRID and with 2 dimensions occupies 21 bytes + 8 minimum GPKG header)
         {
@@ -1178,16 +1179,16 @@ static void fnct_STMaxM(sqlite3_context *context, int argc, sqlite3_value **argv
 
 // SQL function: SQL function: ST_IsEmpty(GEOMETRY); 
 // Returns 1 if the geometry is empty, 0 if it is not empty, -1 if there is an error (therefore ISEMPTY (GEOM) is evaluated to TRUE)
-static void fnct_STIsEmpty(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_STIsEmpty(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    unsigned char *p_blob;
+    unsigned char* p_blob;
     int n_bytes;
     int index = 0;
     int res = -1;
 
     if (sqlite3_value_type(argv[0]) == SQLITE_BLOB) // Must be a BLOB
     {
-        p_blob = (unsigned char *)sqlite3_value_blob(argv[0]);
+        p_blob = (unsigned char*)sqlite3_value_blob(argv[0]);
         n_bytes = sqlite3_value_bytes(argv[0]);
         if (n_bytes >= 13) // Not enough bytes (at least 1 for Endianess and 4 for TypeInt + 8 minimum GPKG header)
             res = isEmptyGPKGGeometry(p_blob, n_bytes, &index, endian(), wkbGeometry);
@@ -1206,18 +1207,18 @@ static void fnct_STIsEmpty(sqlite3_context *context, int argc, sqlite3_value **a
 // Populates the gpkg_contents table (if not already present)
 // Populates the gpkg_geometry_columns table
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGAddGeometryColumn(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGAddGeometryColumn(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    const char *identifier;
-    const char *table;
-    const char *gcolumn;
-    const char *gtype;
+    const char* identifier;
+    const char* table;
+    const char* gcolumn;
+    const char* gtype;
     int igtype;
     int srsid;
     int zflag;
     int mflag;
-    sqlite3 *db;
-    char *sql;
+    sqlite3* db;
+    char* sql;
 
     // Get the parameters
     identifier = (const char*)sqlite3_value_text(argv[0]);
@@ -1279,13 +1280,13 @@ static void fnct_GPKGAddGeometryColumn(sqlite3_context *context, int argc, sqlit
 // Registers the gpkg extension gpkg_rtree_index
 // Populates the spatial index
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGAddSpatialIndex(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    const char *table;
-    const char *gcolumn;
-    const char *icolumn;
-    sqlite3 *db;
-    char *sql, *errsql;
+    const char* table;
+    const char* gcolumn;
+    const char* icolumn;
+    sqlite3* db;
+    char* sql, * errsql;
 
     // Get the parameters
     table = (const char*)sqlite3_value_text(argv[0]);
@@ -1318,7 +1319,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_update2\" AFTER UPDATE OF \"%w\" ON \"%w\" WHEN OLD.\"%w\" = NEW.\"%w\" AND (NEW.\"%w\" IS NULL OR ST_IsEmpty(NEW.\"%w\"))\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id = OLD.\"%w\";\nEND;",
         table, gcolumn, gcolumn, table, icolumn, icolumn, gcolumn, gcolumn, table, gcolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1331,7 +1332,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree for old and new <i>
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_update4\" AFTER UPDATE ON \"%w\" WHEN OLD.\"%w\" != NEW.\"%w\" AND (NEW.\"%w\" IS NULL OR ST_IsEmpty(NEW.\"%w\"))\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id IN (OLD.\"%w\", NEW.\"%w\");\nEND;\n",
         table, gcolumn, table, icolumn, icolumn, gcolumn, gcolumn, table, gcolumn, icolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1370,15 +1371,15 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     //    Actions: Remove record from rtree for old <i>
     sql = sqlite3_mprintf("CREATE TRIGGER \"rtree_%w_%w_delete\" AFTER DELETE ON \"%w\" WHEN old.\"%w\" NOT NULL\nBEGIN\n   DELETE FROM \"rtree_%w_%w\" WHERE id = OLD.\"%w\";\nEND;",
         table, gcolumn, table, gcolumn, table, gcolumn, icolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
 
     // Register GPKG Extension
-    sql = sqlite3_mprintf("INSERT INTO gpkg_extensions(table_name, column_name, extension_name, definition, scope)  VALUES(%Q, %Q, 'gpkg_rtree_index', 'F.3 RTree Spatial Index', 'write-only')", 
+    sql = sqlite3_mprintf("INSERT INTO gpkg_extensions(table_name, column_name, extension_name, definition, scope)  VALUES(%Q, %Q, 'gpkg_rtree_index', 'http://www.geopackage.org', 'write-only')",
         table, gcolumn);
-    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1386,7 +1387,7 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
     // Populate rtree
     sql = sqlite3_mprintf("INSERT OR REPLACE INTO \"rtree_%w_%w\" SELECT \"%w\", ST_MinX(\"%w\"), ST_MaxX(\"%w\"), ST_MinY(\"%w\"), ST_MaxY(\"%w\") FROM \"%w\"",
         table, gcolumn, icolumn, gcolumn, gcolumn, gcolumn, gcolumn, table);
-    errsql = sqlite3_mprintf("DELETE FROM gpkg_extensions where table_name = %Q AND column_name = %Q AND extension_name = 'gpkg_rtree_index'; DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    errsql = sqlite3_mprintf("DELETE FROM gpkg_extensions where table_name = %Q AND column_name = %Q AND extension_name = 'gpkg_rtree_index'; DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, errsql) != SQLITE_OK)
         return;
@@ -1399,12 +1400,12 @@ static void fnct_GPKGAddSpatialIndex(sqlite3_context *context, int argc, sqlite3
 // Drops a spatial index of a table and the corresponding triggers to maintain the integrity between the spatial index and the table
 // Unregisters the gpkg extension gpkg_rtree_index
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGDropSpatialIndex(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    const char *table;
-    const char *gcolumn;
-    sqlite3 *db;
-    char *sql;
+    const char* table;
+    const char* gcolumn;
+    sqlite3* db;
+    char* sql;
 
     // Get the parameters
     table = (const char*)sqlite3_value_text(argv[0]);
@@ -1414,7 +1415,7 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite
     db = sqlite3_context_db_handle(context);
 
     // Drop triggers and RTree
-    sql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"", 
+    sql = sqlite3_mprintf("DROP TRIGGER \"rtree_%w_%w_delete\"; DROP TRIGGER \"rtree_%w_%w_update7\"; DROP TRIGGER \"rtree_%w_%w_update6\"; DROP TRIGGER \"rtree_%w_%w_update5\"; DROP TRIGGER \"rtree_%w_%w_update4\"; DROP TRIGGER \"rtree_%w_%w_update2\"; DROP TRIGGER \"rtree_%w_%w_insert\"; DROP TABLE \"rtree_%w_%w\"",
         table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn, table, gcolumn);
     if (sqlite3_exec_free(context, db, sql, NULL) != SQLITE_OK)
         return;
@@ -1428,7 +1429,7 @@ static void fnct_GPKGDropSpatialIndex(sqlite3_context *context, int argc, sqlite
 // SQL function: GPKG_ExtVersion(); 
 // Returns an string showing the version of this extension
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGExtVersion(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGExtVersion(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
     sqlite3_result_text(context, VERSION, -1, NULL);
 }
@@ -1437,11 +1438,11 @@ static void fnct_GPKGExtVersion(sqlite3_context *context, int argc, sqlite3_valu
 // Returns an integer showing the GeoPackage version
 // Is the value stored as PRAGMA user_version
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGVersion(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGVersion(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    sqlite3 *db;
-    char *sql;
-    sqlite3_stmt *stmt;
+    sqlite3* db;
+    char* sql;
+    sqlite3_stmt* stmt;
     int ret;
     int version = 0;
 
@@ -1459,7 +1460,7 @@ static void fnct_GPKGVersion(sqlite3_context *context, int argc, sqlite3_value *
     ret = sqlite3_step(stmt);
     if (ret == SQLITE_ROW)
         version = sqlite3_column_int(stmt, 0);
-    else 
+    else
     {
         sqlite3_result_error(context, "GPKG_Version() version undefined", -1);
         return;
@@ -1474,10 +1475,10 @@ static void fnct_GPKGVersion(sqlite3_context *context, int argc, sqlite3_value *
 // Creates the base tables for an empty GeoPackage
 // version -> optional parameter must be 10200 or 10300 or 10400. If not specified assumes 10400.
 // On success returns nothing. If there is an error throw an exception
-static void fnct_GPKGInitialize(sqlite3_context *context, int argc, sqlite3_value **argv)
+static void fnct_GPKGInitialize(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
-    sqlite3 *db;
-    char *sql, *errsql;
+    sqlite3* db;
+    char* sql, * errsql;
     int userVersion = GPKG_VERSION_10400;
 
     // Get the parameters
@@ -1608,7 +1609,7 @@ static void fnct_GPKGInitialize(sqlite3_context *context, int argc, sqlite3_valu
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-int sqlite3_gpkg_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
+int sqlite3_gpkg_init(sqlite3* db, char** pzErrMsg, const sqlite3_api_routines* pApi)
 {
     int rc = SQLITE_OK;
     SQLITE_EXTENSION_INIT2(pApi);
